@@ -87,6 +87,30 @@ params_ransac = fusion.align_with_ransac()
 - Performance depends on image quality, overlap, and initial parameter ranges.
 - The evolutionary method is slower but more robust for maps with partial overlaps or low keypoint matches.
 
-## License
 
-MIT License
+# ROS 2 Node
+
+We provide the ROS 2 node to test directly the algorithm reading occupancy grid maps from two different topics (robot 1 and robot 2)
+
+## Node structure
+
+map_fusion_ga/
+├── map_fusion_ga/
+│   ├── __init__.py
+│   ├── fusion_node.py
+│   └── genetic_fusion.py   
+├── launch/
+│   └── fusion.launch.py
+├── setup.py
+├── package.xml
+
+## Build and Run
+
+    colcon build
+    source install/setup.bash
+    ros2 launch map_fusion_ga fusion.launch.py
+
+
+# License
+
+GNU GPLv3
