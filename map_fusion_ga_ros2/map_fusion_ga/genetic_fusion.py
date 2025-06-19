@@ -14,11 +14,13 @@ import random
 import cv2 as cv
 from scipy.ndimage import rotate, sobel, binary_dilation
 from scipy.signal import correlate2d
-import pandas as pd
+from skimage.transform import AffineTransform, warp
+from scipy.spatial import distance_matrix
+from scipy.sparse.csgraph import minimum_spanning_tree
 
 class GeneticMapFusion:
-    def __init__(self, ref_map, target_map, map_name = "", max_generations = 100, pop_size=100, generations=30,
-                convergence_generations = 5, mutation_std=(4, 4, 4), elite_size=3, selection_pool=10):
+    def __init__(self, ref_map, target_map, max_generations = 100, pop_size=20, generations=40,
+                 mutation_std=(4, 4, 4), elite_size=3, selection_pool=10):
         self.ref_map = ref_map
         self.target_map = target_map
         self.pop_size = pop_size
@@ -27,9 +29,6 @@ class GeneticMapFusion:
         self.elite_size = elite_size
         self.selection_pool = selection_pool
         self.max_generations = max_generations
-        self.fitness_log = pd.DataFrame()
-        self.map_name = map_name
-        self.convergence_generations = convergence_generations
 
     def edge_weighted_iou(self, ref, target):
         # Edge dilatation using sobel
@@ -102,10 +101,7 @@ class GeneticMapFusion:
             random.uniform(*theta_range)
         ]) for _ in range(self.pop_size)]
 
-    def evolve(self, tx_range=(-20, 20), ty_range=(-20, 20), theta_range=(-15, 15),
-            fitness_threshold=0.80, generations=30, max_generations=100,
-            convergence_generations=5, improvement_threshold=1e-4): # check this params!
-
+    def evolve(self, tx_range=(-20, 20), ty_range=(-20, 20), theta_range=(-15, 15), fitness_threshold=0.80, min_generations=30, max_generations=1000):
         if tx_range is None:
             tx_range = (-self.ref_map.shape[1], self.ref_map.shape[1])
         if ty_range is None:
@@ -115,62 +111,35 @@ class GeneticMapFusion:
         best_fitness = -np.inf
         best_individual = None
 
-        stagnant_count = 0  # Tracks stagnant generations
-
         for gen in range(max_generations):
             fitness_scores = [self.evaluate_fitness(ind) for ind in population]
-
-            if self.fitness_log.empty:
-                self.fitness_log = pd.DataFrame(columns=[f"chrom_{i}" for i in range(len(fitness_scores))])
-            self.fitness_log.loc[f'g{gen}'] = fitness_scores
-
             gen_best = max(fitness_scores)
             gen_best_ind = population[np.argmax(fitness_scores)]
 
-            # Track convergence
-            if gen_best > best_fitness + improvement_threshold:
+            if gen_best > best_fitness:
                 best_fitness = gen_best
                 best_individual = gen_best_ind
-                stagnant_count = 0  # Reset counter
-            else:
-                stagnant_count += 1
 
-            # Print fitness if needed
-            # print(f"Generation {gen}: Best fitness = {gen_best:.4f}")
+            #print(f"Generation {gen}: Best fitness = {gen_best:.4f}")
 
-            # Early stop: if fitness threshold met *and* minimum generations passed
-            if best_fitness >= fitness_threshold and gen >= generations:
-                print(f"Stopping early due to threshold at generation {gen} with fitness {best_fitness:.4f}")
+            # Stop early if above threshold and min generations completed
+            if best_fitness >= fitness_threshold and gen >= min_generations:
+                print(f"Stopping early at generation {gen} with fitness {best_fitness:.4f}")
                 break
 
-            # Early stop: if no significant improvement for N generations
-            if stagnant_count >= convergence_generations and gen >= generations:
-                print(f"Stopping early due to convergence at generation {gen} with fitness {best_fitness:.4f}")
-                break
-
-            # Elitism + mutation
+            # Elitism: keep top individuals
             sorted_population = [x for _, x in sorted(zip(fitness_scores, population), key=lambda p: -p[0])]
             new_population = sorted_population[:self.elite_size]
 
-            # covariance matrix for mutation
-            cov_matrix = np.diag((self.mutation_std * (1 - gen / max_generations))**2)
-
             while len(new_population) < self.pop_size:
                 parents = random.sample(sorted_population[:self.selection_pool], 2)
+                mutation_scale = self.mutation_std * (1 - gen / max_generations)
 
                 child = (parents[0] + parents[1]) / 2
-                # Change from random mutation with some normal noise to scale covariance
-                # mutation_scale = self.mutation_std * (1 - gen / max_generations)
-                # mutation = np.random.normal(loc=0, scale=mutation_scale)
+                mutation = np.random.normal(loc=0, scale=mutation_scale)
 
-                # Mutate with multivariate normal
-                mutation = np.random.multivariate_normal(mean=np.zeros(3), cov=cov_matrix)
-
-                # Occasionally add stronger mutations
                 if gen % 5 == 0 and random.random() < 0.3:
-                    mutation += np.random.multivariate_normal(mean=np.zeros(3), cov=np.diag((self.mutation_std * 0.5)**2))
-
-                # Occasionally mutate a single parameter more
+                    mutation += np.random.normal(loc=0, scale=self.mutation_std * 0.5)
                 if random.random() < 0.1:
                     param_idx = np.random.randint(0, 3)
                     mutation[param_idx] += np.random.normal(loc=0, scale=self.mutation_std[param_idx] * 2)
@@ -180,13 +149,8 @@ class GeneticMapFusion:
 
             population = new_population
 
-        # logging
-        filename = f"ga_{self.map_name}_pop{self.pop_size}_gen{self.generations}.csv"
-        self.fitness_log.to_csv(filename, index=True)
-
-        print(f"Final Generation {gen}: Best fitness = {best_fitness:.4f}")
+        print(f"Generation {gen}: Best fitness = {gen_best:.4f}")
         return best_individual
-
 
     def fuse_maps_aligned(self, best_params):
         # Fuse maps using the best transformation parameters found

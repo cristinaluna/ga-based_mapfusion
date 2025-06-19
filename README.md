@@ -90,7 +90,7 @@ params_ransac = fusion.align_with_ransac()
 
 # ROS 2 Node
 
-We provide the ROS 2 node to test directly the algorithm reading occupancy grid maps from two different topics (robot 1 and robot 2)
+We provide the ROS 2 node to test directly the algorithm reading occupancy grid maps from two different topics (robot 1 and robot 2). These topics are named /map1 and /map2, be sure to change the name if topics are named differently. Fused map is published to /fused_map
 
 ## Node structure
 
