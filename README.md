@@ -34,7 +34,7 @@ pip install numpy scipy scikit-image opencv-python matplotlib pillow ipython
 ### 1. Initialisation
 
 ```python
-from your_module import GeneticMapFusion
+from genetic_fusion import GeneticMapFusion
 
 ref_map = ...       # Binary 2D numpy array
 target_map = ...    # Binary 2D numpy array
