@@ -3,7 +3,7 @@
 Map fusion using GA algorithm
 
 
-Authors: C. Luna, E. Ruiz, P. López
+Authors: C. Luna, E. Ruiz, P. López, D. F. Barrero
 Maintainer: @cristinaluna
 
 '''
@@ -14,9 +14,12 @@ import random
 import cv2 as cv
 from scipy.ndimage import rotate, sobel, binary_dilation
 from scipy.signal import correlate2d
-import pandas as pd
+from scipy.spatial import distance_matrix
+from scipy.sparse.csgraph import minimum_spanning_tree
+from skimage.transform import AffineTransform, warp
 import matplotlib.pyplot as plt
-import imageio
+import pandas as pd
+from joblib import Parallel, delayed
 
 class GeneticMapFusion:
     def __init__(self, ref_map, target_map, map_name = "", max_generations = 100, pop_size=100, generations=30,
@@ -34,7 +37,6 @@ class GeneticMapFusion:
         self.map_name = map_name
         self.convergence_generations = convergence_generations
         self.fitness_weights = fitness_weights  # (NCC_weight, EdgeIoU_weight)
-        self.frames = []  # For saving GIF
 
     def edge_weighted_iou(self, ref, target):
         # Edge dilatation using sobel
@@ -131,7 +133,12 @@ class GeneticMapFusion:
         stagnant_count = 0  # Tracks stagnant generations
 
         for gen in range(max_generations):
-            fitness_scores = [self.evaluate_fitness(ind) for ind in population]
+            # fitness_scores = [self.evaluate_fitness(ind) for ind in population] # one process only
+            # paralellization
+            args_list = [(self.ref_map, self.target_map, ind, self.fitness_weights) for ind in population]
+            fitness_scores = Parallel(n_jobs=-1)(
+                delayed(self.evaluate_fitness_parallel)(*args) for args in args_list
+            )
 
             if self.fitness_log.empty:
                 self.fitness_log = pd.DataFrame(columns=[f"chrom_{i}" for i in range(len(fitness_scores))])
@@ -171,7 +178,7 @@ class GeneticMapFusion:
             while len(new_population) < self.pop_size:
                 parents = random.sample(sorted_population[:self.selection_pool], 2)
 
-                # Crossover with random weight
+                # add real crossover with random weight
                 alpha = random.uniform(0.3, 0.7)
                 child = alpha * parents[0] + (1 - alpha) * parents[1]
                 # Change from random mutation with some normal noise to scale covariance
@@ -199,38 +206,8 @@ class GeneticMapFusion:
         filename = f"ga_{self.map_name}_pop{self.pop_size}_gen{self.generations}.csv"
         self.fitness_log.to_csv(filename, index=True)
 
-        # save_alignment_fitness
-        self.generate_alignment_plot()
-        self.save_gif(None, final=True)
-
         print(f"Final Generation {gen}: Best fitness = {best_fitness:.4f}")
         return best_individual
-    
-    def save_gif(self, individual, gen=0, fitness=None, final=False):
-        if final:
-            imageio.mimsave(f"alignment_{self.map_name}.gif", self.frames, duration=0.4)
-            return
-
-        fused_map, canvas, target_canvas = self.fuse_maps_aligned(individual)
-        display = (fused_map * 255).astype(np.uint8)
-        display_color = cv.cvtColor(display, cv.COLOR_GRAY2BGR)
-
-        cv.putText(display_color, f"Gen: {gen}", (10, 20), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv.putText(display_color, f"Fitness: {fitness:.3f}", (10, 40), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        self.frames.append(display_color)
-
-    def generate_alignment_plot(self):
-        df = self.fitness_log.transpose()
-        best_indices = df.idxmax()
-        best_params = [eval(i.replace("chrom_", "")) for i in best_indices.index]
-        plt.figure(figsize=(10, 4))
-        plt.plot(df.max(axis=0))
-        plt.title("Fitness Progression")
-        plt.xlabel("Generation")
-        plt.ylabel("Fitness")
-        plt.grid(True)
-        plt.savefig(f"fitness_progress_{self.map_name}.png")
-        plt.close()
 
     def fuse_maps_aligned(self, best_params):
         # Fuse maps using the best transformation parameters found
@@ -241,8 +218,8 @@ class GeneticMapFusion:
         rot_h, rot_w = rotated.shape
 
         # Create canvas large enough to contain both maps
-        canvas_h = max(ref_h, rot_h + abs(int(ty))) + ref_h/2
-        canvas_w = max(ref_w, rot_w + abs(int(tx))) + ref_w/2
+        canvas_h = int(max(ref_h, rot_h + abs(int(ty))) + ref_h/2)
+        canvas_w = int(max(ref_w, rot_w + abs(int(tx))) + ref_w/2)
         canvas = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
         # Place reference map
@@ -275,7 +252,70 @@ class GeneticMapFusion:
                      np.where((canvas == 1) | (target_canvas == 1), 0.5, 0))
 
         return fused_map, canvas, target_canvas
-      
+
+    @staticmethod
+    def evaluate_fitness_parallel(ref_map, target_map, individual, fitness_weights):
+        from scipy.ndimage import rotate, sobel, binary_dilation  # Required if joblib uses separate processes
+        import numpy as np
+
+        def edge_weighted_iou(ref, target):
+            ref_processed = binary_dilation(ref.astype(bool))
+            target_processed = binary_dilation(target.astype(bool))
+
+            ref_edges = sobel(ref_processed.astype(float)).astype(bool)
+            target_edges = sobel(target_processed.astype(float)).astype(bool)
+
+            intersection = np.logical_and(ref_edges, target_edges).sum()
+            union = np.logical_or(ref_edges, target_edges).sum()
+            return intersection / union if union > 0 else 0
+
+        tx, ty, theta = individual
+        rotated = rotate(target_map, theta, reshape=False, order=1, mode='constant', cval=0)
+
+        canvas_h = ref_map.shape[0] * 3
+        canvas_w = ref_map.shape[1] * 3
+        ref_canvas = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
+        target_canvas = np.zeros_like(ref_canvas)
+
+        center_y, center_x = canvas_h // 2, canvas_w // 2
+        y_ref = center_y - ref_map.shape[0] // 2
+        x_ref = center_x - ref_map.shape[1] // 2
+        ref_canvas[y_ref:y_ref + ref_map.shape[0], x_ref:x_ref + ref_map.shape[1]] = ref_map
+
+        y_shift = center_y - rotated.shape[0] // 2 + int(round(ty))
+        x_shift = center_x - rotated.shape[1] // 2 + int(round(tx))
+
+        y_start = np.clip(y_shift, 0, canvas_h)
+        x_start = np.clip(x_shift, 0, canvas_w)
+        y_end = np.clip(y_shift + rotated.shape[0], 0, canvas_h)
+        x_end = np.clip(x_shift + rotated.shape[1], 0, canvas_w)
+
+        ry1 = np.clip(-y_shift, 0, rotated.shape[0])
+        rx1 = np.clip(-x_shift, 0, rotated.shape[1])
+        ry2 = ry1 + (y_end - y_start)
+        rx2 = rx1 + (x_end - x_start)
+
+        if any(val <= 0 for val in [y_end - y_start, x_end - x_start, ry2 - ry1, rx2 - rx1]):
+            return 0
+
+        try:
+            target_canvas[y_start:y_end, x_start:x_end] = rotated[ry1:ry2, rx1:rx2]
+        except ValueError:
+            return 0
+
+        region_ref = ref_canvas[y_start:y_end, x_start:x_end]
+        region_target = target_canvas[y_start:y_end, x_start:x_end]
+
+        if region_ref.shape != region_target.shape:
+            return 0
+
+        numerator = np.sum(region_ref * region_target)
+        denominator = np.sqrt(np.sum(region_ref ** 2) * np.sum(region_target ** 2))
+        ncc_score = numerator / denominator if denominator > 0 else 0
+        edge_iou = edge_weighted_iou(region_ref, region_target)
+
+        return fitness_weights[0] * ncc_score + fitness_weights[1] * edge_iou
+
 # ----------------- COMPARISON WITH OTHER METHODS --------
 
     # aligning using cross correlation

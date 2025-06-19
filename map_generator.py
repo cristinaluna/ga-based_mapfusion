@@ -1,3 +1,14 @@
+'''
+
+Map generator
+
+
+Authors: C. Luna, E. Ruiz, P. López, D. F. Barrero
+Maintainer: @cristinaluna
+
+'''
+
+
 import numpy as np
 import cv2 as cv
 import random
