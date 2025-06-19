@@ -121,4 +121,19 @@ map_fusion_ga/
 
 # License
 
-GNU GPLv3
+CC by 4.0
+
+# Cite this!
+
+[![DOI](https://zenodo.org/badge/1002482009.svg)](https://doi.org/10.5281/zenodo.15696362)
+
+@misc{ga_map_fusion,
+  doi = {10.5281/ZENODO.15696362},
+  url = {https://zenodo.org/doi/10.5281/zenodo.15696362},
+  author = {Cristina Luna,  Enrique Ruiz, Paula López, David F. Barrero},
+  title = {cristinaluna/ga-based_mapfusion: v0.1},
+  publisher = {Zenodo},
+  year = {2025},
+  copyright = {Creative Commons Attribution 4.0 International}
+}
+
