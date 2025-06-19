@@ -95,13 +95,21 @@ We provide the ROS 2 node to test directly the algorithm reading occupancy grid 
 ## Node structure
 
 map_fusion_ga/
+
 ├── map_fusion_ga/
+
 │   ├── __init__.py
+
 │   ├── fusion_node.py
-│   └── genetic_fusion.py   
+
+│   └── genetic_fusion.py  
+
 ├── launch/
+
 │   └── fusion.launch.py
+
 ├── setup.py
+
 ├── package.xml
 
 ## Build and Run
