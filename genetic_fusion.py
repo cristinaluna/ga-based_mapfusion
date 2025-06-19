@@ -15,10 +15,13 @@ import cv2 as cv
 from scipy.ndimage import rotate, sobel, binary_dilation
 from scipy.signal import correlate2d
 import pandas as pd
+import matplotlib.pyplot as plt
+import imageio
 
 class GeneticMapFusion:
     def __init__(self, ref_map, target_map, map_name = "", max_generations = 100, pop_size=100, generations=30,
-                convergence_generations = 5, mutation_std=(4, 4, 4), elite_size=3, selection_pool=10):
+                convergence_generations = 5, mutation_std=(4, 4, 4), elite_size=3, selection_pool=10,
+                 fitness_weights=(0.7, 0.3)):
         self.ref_map = ref_map
         self.target_map = target_map
         self.pop_size = pop_size
@@ -30,6 +33,8 @@ class GeneticMapFusion:
         self.fitness_log = pd.DataFrame()
         self.map_name = map_name
         self.convergence_generations = convergence_generations
+        self.fitness_weights = fitness_weights  # (NCC_weight, EdgeIoU_weight)
+        self.frames = []  # For saving GIF
 
     def edge_weighted_iou(self, ref, target):
         # Edge dilatation using sobel
@@ -44,7 +49,7 @@ class GeneticMapFusion:
 
         return intersection / union if union > 0 else 0
 
-    def evaluate_fitness(self, individual): # using ncc instead of IoU since it is more robust for non-fully-coincident maps
+    def evaluate_fitness(self, individual):
         tx, ty, theta = individual
         rotated = rotate(self.target_map, theta, reshape=False, order=1, mode='constant', cval=0)
 
@@ -86,20 +91,28 @@ class GeneticMapFusion:
         if region_ref.shape != region_target.shape:
             return 0
 
+        # Normalized Cross Correlation (NCC)
         numerator = np.sum(region_ref * region_target)
         denominator = np.sqrt(np.sum(region_ref ** 2) * np.sum(region_target ** 2))
-        score = numerator / denominator if denominator > 0 else 0
+        ncc_score = numerator / denominator if denominator > 0 else 0
 
-        if self.generations == 0:
-            print(f"Initial fitness score: {score:.4f} for params {individual}")
+        # Edge-weighted IoU
+        edge_iou = self.edge_weighted_iou(region_ref, region_target)
 
+        # Weighted combination
+        score = self.fitness_weights[0] * ncc_score + self.fitness_weights[1] * edge_iou
         return score
 
     def generate_initial_population(self, tx_range, ty_range, theta_range):
+        # Initialize using Gaussian distribution centered at 0
+        tx_std = (tx_range[1] - tx_range[0]) / 6
+        ty_std = (ty_range[1] - ty_range[0]) / 6
+        theta_std = (theta_range[1] - theta_range[0]) / 6
+
         return [np.array([
-            random.uniform(*tx_range),
-            random.uniform(*ty_range),
-            random.uniform(*theta_range)
+            np.clip(np.random.normal(0, tx_std), *tx_range),
+            np.clip(np.random.normal(0, ty_std), *ty_range),
+            np.clip(np.random.normal(0, theta_std), *theta_range)
         ]) for _ in range(self.pop_size)]
 
     def evolve(self, tx_range=(-20, 20), ty_range=(-20, 20), theta_range=(-15, 15),
@@ -158,7 +171,9 @@ class GeneticMapFusion:
             while len(new_population) < self.pop_size:
                 parents = random.sample(sorted_population[:self.selection_pool], 2)
 
-                child = (parents[0] + parents[1]) / 2
+                # Crossover with random weight
+                alpha = random.uniform(0.3, 0.7)
+                child = alpha * parents[0] + (1 - alpha) * parents[1]
                 # Change from random mutation with some normal noise to scale covariance
                 # mutation_scale = self.mutation_std * (1 - gen / max_generations)
                 # mutation = np.random.normal(loc=0, scale=mutation_scale)
@@ -184,9 +199,38 @@ class GeneticMapFusion:
         filename = f"ga_{self.map_name}_pop{self.pop_size}_gen{self.generations}.csv"
         self.fitness_log.to_csv(filename, index=True)
 
+        # save_alignment_fitness
+        self.generate_alignment_plot()
+        self.save_gif(None, final=True)
+
         print(f"Final Generation {gen}: Best fitness = {best_fitness:.4f}")
         return best_individual
+    
+    def save_gif(self, individual, gen=0, fitness=None, final=False):
+        if final:
+            imageio.mimsave(f"alignment_{self.map_name}.gif", self.frames, duration=0.4)
+            return
 
+        fused_map, canvas, target_canvas = self.fuse_maps_aligned(individual)
+        display = (fused_map * 255).astype(np.uint8)
+        display_color = cv.cvtColor(display, cv.COLOR_GRAY2BGR)
+
+        cv.putText(display_color, f"Gen: {gen}", (10, 20), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv.putText(display_color, f"Fitness: {fitness:.3f}", (10, 40), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        self.frames.append(display_color)
+
+    def generate_alignment_plot(self):
+        df = self.fitness_log.transpose()
+        best_indices = df.idxmax()
+        best_params = [eval(i.replace("chrom_", "")) for i in best_indices.index]
+        plt.figure(figsize=(10, 4))
+        plt.plot(df.max(axis=0))
+        plt.title("Fitness Progression")
+        plt.xlabel("Generation")
+        plt.ylabel("Fitness")
+        plt.grid(True)
+        plt.savefig(f"fitness_progress_{self.map_name}.png")
+        plt.close()
 
     def fuse_maps_aligned(self, best_params):
         # Fuse maps using the best transformation parameters found
