@@ -125,15 +125,17 @@ CC by 4.0
 
 # Cite this!
 
-[![DOI](https://zenodo.org/badge/1002482009.svg)](https://doi.org/10.5281/zenodo.15696362)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15696363.svg)](https://doi.org/10.5281/zenodo.15696363)
 
-@misc{ga_map_fusion,
-  doi = {10.5281/ZENODO.15696362},
-  url = {https://zenodo.org/doi/10.5281/zenodo.15696362},
-  author = {Cristina Luna,  Enrique Ruiz, Paula López, David F. Barrero},
-  title = {cristinaluna/ga-based_mapfusion: v0.1},
-  publisher = {Zenodo},
-  year = {2025},
-  copyright = {Creative Commons Attribution 4.0 International}
-}
+    @misc{https://doi.org/10.5281/zenodo.15696363,
+      doi = {10.5281/ZENODO.15696363},
+      url = {https://zenodo.org/doi/10.5281/zenodo.15696363},
+      author = {Luna,  Cristina and Ruiz,  Enrique and López,  Paula and F. Barrero,  David},
+      title = {Genetic Algorithm-based Map Fusion},
+      publisher = {Zenodo},
+      year = {2025},
+      copyright = {Creative Commons Attribution 4.0 International}
+    }
+
+Or: Luna, C., Ruiz, E., López, P., & F. Barrero, D. (2025). Genetic Algorithm-based Map Fusion (preliminary). Zenodo. https://doi.org/10.5281/zenodo.15696363
 
