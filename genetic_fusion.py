@@ -197,8 +197,8 @@ class GeneticMapFusion:
         rot_h, rot_w = rotated.shape
 
         # Create canvas large enough to contain both maps
-        canvas_h = max(ref_h, rot_h + abs(int(ty))) + 50
-        canvas_w = max(ref_w, rot_w + abs(int(tx))) + 50
+        canvas_h = max(ref_h, rot_h + abs(int(ty))) + ref_h/2
+        canvas_w = max(ref_w, rot_w + abs(int(tx))) + ref_w/2
         canvas = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
         # Place reference map
